@@ -26,3 +26,9 @@ application {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.register<JavaExec>("simulate") {
+    description = "Runs the deterministic simulator over many seeds"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass = "raftkv.sim.Main"
+}
