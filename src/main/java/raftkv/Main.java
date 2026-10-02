@@ -119,12 +119,26 @@ public final class Main {
         double reads = Double.parseDouble(o.getOrDefault("reads", "0"));
         boolean sync = Boolean.parseBoolean(o.getOrDefault("sync", "true"));
         try (LocalCluster lc = cluster(nodes, sync)) {
-            waitForLeader(lc.addresses());
-            run(lc.addresses(), clients, 2, reads);  // warm up the JIT and the connections
-            Result r = run(lc.addresses(), clients, seconds, reads);
-            System.out.printf("%d clients, %d s, %.0f%% reads: %,d ops, %,.0f ops/s, latency p50 %.2f ms, p99 %.2f ms, max %.1f ms%n",
-                    clients, seconds, reads * 100, r.ops, r.ops / (double) seconds, r.pct(0.50), r.pct(0.99),
-                    r.pct(1.0));
+            int leader = waitForLeader(lc.addresses());
+            ThreadLocalRandom rnd = ThreadLocalRandom.current();
+            List<KvClient> cs = new ArrayList<>();
+            try {
+                // Connect one client at a time, straight to the leader. Thousands of connects at
+                // once overflow the listen queue (macOS caps it at 128), and the retries and
+                // redirects then run the machine out of local ports.
+                for (int i = 0; i < clients; i++) {
+                    KvClient c = new KvClient(rnd.nextLong(1, Long.MAX_VALUE), lc.addresses(), 2000);
+                    cs.add(c);
+                    c.connectTo(leader);
+                }
+                run(cs, 2, reads);  // warm up the JIT
+                Result r = run(cs, seconds, reads);
+                System.out.printf("%d clients, %d s, %.0f%% reads: %,d ops, %,.0f ops/s, latency p50 %.2f ms, p99 %.2f ms, max %.1f ms%n",
+                        clients, seconds, reads * 100, r.ops, r.ops / (double) seconds, r.pct(0.50), r.pct(0.99),
+                        r.pct(1.0));
+            } finally {
+                for (KvClient c : cs) c.close();
+            }
         }
     }
 
@@ -136,40 +150,42 @@ public final class Main {
         }
     }
 
-    private static Result run(Map<Integer, InetSocketAddress> addrs, int clients, int seconds, double reads)
-            throws InterruptedException {
+    private static Result run(List<KvClient> cs, int seconds, double reads) throws InterruptedException {
+        int clients = cs.size();
         long end = System.nanoTime() + seconds * 1_000_000_000L;
-        List<long[]> perClient = new ArrayList<>();
+        long[][] perClient = new long[clients][];
+        int[] counts = new int[clients];
         List<Thread> threads = new ArrayList<>();
-        long[] counts = new long[clients];
         for (int i = 0; i < clients; i++) {
-            long[] lat = new long[2_000_000];
-            perClient.add(lat);
             int idx = i;
+            KvClient c = cs.get(i);
             threads.add(Thread.ofVirtual().start(() -> {
                 ThreadLocalRandom rnd = ThreadLocalRandom.current();
-                try (KvClient c = new KvClient(rnd.nextLong(1, Long.MAX_VALUE), addrs, 2000)) {
-                    int n = 0;
-                    while (System.nanoTime() < end && n < lat.length) {
+                long[] lat = new long[1024];
+                int n = 0;
+                try {
+                    while (System.nanoTime() < end) {
                         String key = "key" + rnd.nextInt(10_000);
                         long t0 = System.nanoTime();
                         if (rnd.nextDouble() < reads) c.get(key);
                         else c.put(key, "value-" + n);
+                        if (n == lat.length) lat = Arrays.copyOf(lat, 2 * n);
                         lat[n++] = System.nanoTime() - t0;
                     }
-                    counts[idx] = n;
                 } catch (IOException e) {
                     System.err.println("client failed: " + e.getMessage());
                 }
+                perClient[idx] = lat;
+                counts[idx] = n;
             }));
         }
         for (Thread t : threads) t.join();
-        long total = Arrays.stream(counts).sum();
+        long total = Arrays.stream(counts).asLongStream().sum();
         long[] all = new long[(int) total];
         int k = 0;
         for (int i = 0; i < clients; i++) {
-            System.arraycopy(perClient.get(i), 0, all, k, (int) counts[i]);
-            k += (int) counts[i];
+            System.arraycopy(perClient[i], 0, all, k, counts[i]);
+            k += counts[i];
         }
         Arrays.sort(all);
         return new Result(total, all);
@@ -177,7 +193,10 @@ public final class Main {
 
     /**
      * Kill the leader with SIGKILL while a client keeps writing, and time how long the cluster
-     * takes to accept a write again. Then restart the dead node, let it catch up, and repeat.
+     * takes to accept a write again: from the moment the old leader's process has exited to the
+     * first acknowledgement of a write sent after that. (Counting any acknowledgement after the
+     * kill would let in writes the old leader answered just before it died.) Then restart the dead
+     * node, let it catch up, and repeat.
      */
     private static void failover(Map<String, String> o) throws Exception {
         int nodes = Integer.parseInt(o.getOrDefault("nodes", "3"));
@@ -185,13 +204,14 @@ public final class Main {
         try (LocalCluster lc = cluster(nodes, true)) {
             Map<Integer, InetSocketAddress> addrs = lc.addresses();
             waitForLeader(addrs);
-            ConcurrentLinkedQueue<Long> acks = new ConcurrentLinkedQueue<>();
+            ConcurrentLinkedQueue<long[]> acks = new ConcurrentLinkedQueue<>();  // {sent, acked}
             AtomicBoolean stop = new AtomicBoolean();
             Thread writer = Thread.ofVirtual().start(() -> {
                 try (KvClient c = new KvClient(42, addrs, 200)) {
                     for (int i = 0; !stop.get(); i++) {
+                        long sent = System.nanoTime();
                         c.put("k" + (i % 100), "v" + i);
-                        acks.add(System.nanoTime());
+                        acks.add(new long[] {sent, System.nanoTime()});
                     }
                 } catch (IOException e) {
                     System.err.println("writer failed: " + e.getMessage());
@@ -201,12 +221,12 @@ public final class Main {
             for (int round = 1; round <= rounds; round++) {
                 Thread.sleep(1000);
                 int leader = waitForLeader(addrs);
+                lc.kill(leader);  // returns once the process has exited
                 long killed = System.nanoTime();
-                lc.kill(leader);
                 Long first = null;
                 while (first == null) {
-                    for (Long t : acks) if (t > killed) {
-                        first = t;
+                    for (long[] a : acks) if (a[0] > killed) {
+                        first = a[1];
                         break;
                     }
                     if (first == null) Thread.sleep(1);
