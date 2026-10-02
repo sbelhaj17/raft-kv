@@ -8,6 +8,13 @@ import java.io.IOException;
 final class Frames {
     private static final int MAX = 64 << 20;
 
+    /**
+     * Stream buffer size for one connection, each way. Frames bigger than this bypass the buffer,
+     * so it only has to fit the small ones. Every client connection holds two of these, and with
+     * 64 KB buffers 8,192 clients took a node past its 512 MB heap.
+     */
+    static final int BUFFER = 8 << 10;
+
     private Frames() {}
 
     static void write(DataOutputStream out, byte[] payload) throws IOException {

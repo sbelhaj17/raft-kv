@@ -46,7 +46,7 @@ abstract class Writer {
                 if (out == null) {
                     OutputStream raw = connect();
                     if (raw == null) continue;
-                    out = new DataOutputStream(new BufferedOutputStream(raw, 1 << 16));
+                    out = new DataOutputStream(new BufferedOutputStream(raw, Frames.BUFFER));
                 }
                 for (byte[] f : batch) if (f.length > 0) Frames.write(out, f);
                 out.flush();

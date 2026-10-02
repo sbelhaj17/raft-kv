@@ -154,7 +154,7 @@ public final class Server implements AutoCloseable {
     private void serve(Socket s) {
         ClientLink link = null;
         try (s) {
-            DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream(), 1 << 16));
+            DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream(), Frames.BUFFER));
             while (running) {
                 switch (Codec.decode(Frames.read(in))) {
                     case Codec.Hello h -> { }  // a peer; what follows are Raft messages
