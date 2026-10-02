@@ -61,6 +61,12 @@ public final class KvClient implements AutoCloseable {
         return call(new Op.Cas(key, expected, value)).ok();
     }
 
+    /** Open the connection to one node now and send requests there first. */
+    public void connectTo(int node) throws IOException {
+        target = node;
+        connect(node);
+    }
+
     /** Ask one particular node about itself. */
     public String status(int node) throws IOException {
         Request r = new Request(id, ++seq, new Op.Status());
@@ -115,7 +121,9 @@ public final class KvClient implements AutoCloseable {
         disconnect();
         Socket s = new Socket();
         s.setTcpNoDelay(true);
-        s.connect(nodes.get(node), 500);
+        // As long as a request may take. macOS caps the listen backlog at 128, so when thousands of
+        // clients connect at once some SYNs are dropped and only the retry, a second later, gets in.
+        s.connect(nodes.get(node), timeoutMillis);
         socket = s;
         connectedTo = node;
         in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
