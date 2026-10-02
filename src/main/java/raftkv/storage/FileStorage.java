@@ -26,8 +26,10 @@ import raftkv.wire.Codec;
  *
  * <p>The log is a sequence of records, each {@code [length][crc32][type][body]}. An entry record
  * replaces any entry already stored at its index or later, which is how a follower's log gets
- * truncated, so replaying the records in order rebuilds the log. Every {@link #save} appends its
- * records and then calls {@code force}, once, before returning; Raft sends nothing until then.
+ * truncated, so replaying the records in order rebuilds the log. {@link #save} appends its records
+ * and calls {@code force} once before returning whenever it wrote entries or a new term or vote;
+ * Raft sends nothing until then. On macOS {@code force} is a full flush to the drive
+ * (F_FULLFSYNC), about 4 ms here, which is what makes it the dominant cost of a write.
  *
  * <p>A crash can leave the last record half written. On load, replay stops at the first record
  * that is short or fails its checksum and the file is cut back to the end of the last good one.
@@ -52,9 +54,19 @@ public final class FileStorage implements Storage, AutoCloseable {
     private Snapshot snapshot = Snapshot.EMPTY;
     private final List<Entry> entries = new ArrayList<>();
 
+    private final boolean sync;
     private long syncs;
 
     public FileStorage(Path dir) {
+        this(dir, true);
+    }
+
+    /**
+     * @param sync false skips every force. Not safe: a crash can then lose writes the cluster
+     *             acknowledged. It exists to measure how much of a write's cost is the disk.
+     */
+    public FileStorage(Path dir, boolean sync) {
+        this.sync = sync;
         this.dir = dir;
         this.walPath = dir.resolve("wal");
         this.snapPath = dir.resolve("snapshot");
@@ -89,7 +101,10 @@ public final class FileStorage implements Storage, AutoCloseable {
                 remember(e);
                 record(buf, ENTRY, out -> Codec.writeEntry(out, e));
             }
+            boolean termOrVoteChanged = false;
             if (rd.hardState() != null) {
+                termOrVoteChanged = rd.hardState().term() != hardState.term()
+                        || rd.hardState().votedFor() != hardState.votedFor();
                 hardState = rd.hardState();
                 HardState hs = hardState;
                 record(buf, HARD_STATE, out -> {
@@ -100,8 +115,13 @@ public final class FileStorage implements Storage, AutoCloseable {
             }
             ByteBuffer b = ByteBuffer.wrap(buf.toByteArray());
             while (b.hasRemaining()) wal.write(b);
-            wal.force(false);
-            syncs++;
+            // Term, vote and entries must be on disk before anything is sent. The commit index
+            // need not be: Raft can recover it, and losing the latest one in a crash only means
+            // replaying less on restart. Forcing for it would add a whole sync to every write.
+            if (sync && (!rd.entries().isEmpty() || termOrVoteChanged)) {
+                wal.force(false);
+                syncs++;
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
