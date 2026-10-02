@@ -241,8 +241,10 @@ public final class Main {
             writer.join(5000);
             List<Double> sorted = new ArrayList<>(gaps);
             sorted.sort(null);
+            int n = sorted.size();
+            double median = n % 2 == 1 ? sorted.get(n / 2) : (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2;
             System.out.printf("over %d kills: min %.0f ms, median %.0f ms, max %.0f ms%n", rounds, sorted.get(0),
-                    sorted.get(sorted.size() / 2), sorted.get(sorted.size() - 1));
+                    median, sorted.get(n - 1));
         }
     }
 }
