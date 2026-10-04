@@ -66,6 +66,7 @@ That third one is the honest limit of the method. Random simulation finds bugs i
 - `RaftNodeTest` drives nodes by hand through specific cases: votes only for up-to-date candidates and once per term, a follower replacing a conflicting uncommitted tail, the rejection hint, the own-term commit rule, reads confirmed only after a majority answers, a new leader holding reads, snapshots for a lagging follower, restart from saved state, stepping down on a higher term, and a stale rejection not moving `next` backwards.
 - `LinearizabilityTest` checks the checker on histories that are and are not linearizable.
 - `FileStorageTest` covers reopening, truncation by a later entry, a torn last record, a corrupted record, snapshots from the leader, compaction, and a crash between the snapshot and log renames.
+- `CodecTest` encodes and decodes every message, request and response type, entries and snapshot bytes included, and checks that an unknown type or trailing bytes are rejected.
 - `ClusterTest` runs three real servers on sockets and files, stops the leader (a clean `close()`, not a crash), keeps writing, restarts it, and checks every key.
 
 ```
