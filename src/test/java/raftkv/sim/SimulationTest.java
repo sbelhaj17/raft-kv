@@ -55,7 +55,8 @@ class SimulationTest {
      * The Figure 8 bug is much harder to hit. A new leader sends the old entries and its own no-op
      * together, so the window where only the old entry is on a majority barely exists. With the
      * default settings 2,000 seeds never found it. With one entry per message and ten times the
-     * crash rate, one seed in 2,000 did (1490), and that run is replayed here.
+     * crash rate on 3 nodes, a search from seed 1 stopped at its first failure, seed 1490, and that
+     * run is replayed here.
      */
     @Test
     void catchesCommittingEntriesFromEarlierTerms() {
