@@ -259,8 +259,9 @@ public final class RaftNode {
     }
 
     private void handleRequestVote(RequestVote v) {
-        // A node that has heard from a leader this term refuses, so a single slow node cannot
-        // keep forcing elections while the leader is healthy.
+        // One vote per term, and none once this node follows a leader of this term. This does not
+        // stop a node that comes back with a higher term from forcing an election: step() forgets
+        // the leader on any higher term, and there is no pre-vote.
         boolean canVote = votedFor == v.from() || (votedFor == NONE && leader == NONE);
         boolean upToDate = v.lastTerm() > log.lastTerm()
                 || (v.lastTerm() == log.lastTerm() && v.lastIndex() >= log.lastIndex());
