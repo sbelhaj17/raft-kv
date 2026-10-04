@@ -24,7 +24,9 @@ I wanted to know whether I could get a consensus protocol right, and how I would
 
 ### The simulator
 
-`sim/Simulator.java` runs a whole cluster, its network and four clients in one thread from one seed. The network delays (1 to 4 ticks), drops (5%), duplicates (2%) and reorders every packet, between nodes and between clients and nodes. On top of that the run splits the nodes into two random groups for 20 to 320 ticks at a time, and crashes random nodes for 10 to 210 ticks. A crashed node keeps only what it saved to its storage. Replicas compact their logs every 25 entries, so followers that come back are often sent a snapshot.
+`sim/Simulator.java` runs a whole cluster, its network and four clients in one thread from one seed. The network delays (1 to 4 ticks), drops (5%), duplicates (2%) and reorders every packet, between nodes and between clients and nodes. On top of that the run splits the nodes into two random groups for 20 to 319 ticks at a time, and crashes random nodes for 10 to 209 ticks. A crashed node keeps only what it saved to its storage. Replicas compact their logs every 25 entries, so followers that come back are often sent a snapshot.
+
+The nodes in the simulator run the same `RaftNode`, `Replica` and `KvStore` code as the server, but each saves to an in-memory `MemStorage`, and messages and client requests travel through the simulated network as Java objects, never encoded or sent over a socket. A node crashes only between ticks, never halfway through a save. So the simulator checks the protocol and the store, not the write-ahead log, the wire format or the TCP server; those are covered only by `FileStorageTest`, `CodecTest` and `ClusterTest` (below).
 
 After every tick it checks the safety properties from the paper:
 
@@ -33,7 +35,7 @@ After every tick it checks the safety properties from the paper:
 - **leader completeness**: a node that becomes leader holds every entry any node has applied
 - **state machine safety**: every replica applies the same entry at each index, and reaches the same state (a running hash of everything applied)
 
-Then it heals the network, restarts every node, lets the clients finish, and checks that the history they saw is linearizable (`sim/Linearizability.java`). Each key is checked as a register with the Wing and Gong search, memoized the way Porcupine does it, since linearizability composes across keys. A write that never got an answer may have happened at any point after it was sent, or not at all.
+Then it heals the network, restarts every node, lets the clients finish, and checks that the history they saw is linearizable (`sim/Linearizability.java`). Each key is checked as a register with the Wing and Gong search, memoized the way Porcupine does it, since linearizability composes across keys. The checker treats a write that never got an answer as one that may have happened at any point after it was sent, or not at all, but the simulator's histories never contain one: a client resends the same request until it gets an answer, and the run fails if any client is still waiting 4,000 ticks after the network heals. Only `LinearizabilityTest` exercises that case.
 
 Results, from `./gradlew simulate --args="--seeds 10000"` and the same with `--nodes 3`:
 
@@ -53,9 +55,9 @@ Results, from `./gradlew simulate --args="--seeds 10000"` and the same with `--n
 
 Zero violations means something only if the checks fail when the system is wrong. So `SimulationTest` breaks three things on purpose:
 
-- **Leaders answer reads from their own state** without confirming they are still leader. The check fails at seed 2: a leader cut off by a partition serves a value the new leader has already overwritten.
-- **Duplicate detection is off.** It fails at seed 1: a retried write applies twice.
-- **The commit rule is off,** so a leader may commit an entry from an earlier term by counting replicas (Figure 8 in the paper). This one was hard to catch. With the default settings, 2,000 seeds never found it. A new leader sends the old entries and its own no-op in the same message, so the window where only the old entry is on a majority almost never opens. With one entry per message and ten times the crash rate, one seed in 2,000 found it (seed 1490), as a new leader missing an entry another node had already applied. The test replays that seed.
+- **Leaders answer reads from their own state** without confirming they are still leader. The linearizability check fails at seed 2: a leader cut off by a partition serves a value the new leader has already overwritten.
+- **Duplicate detection is off.** The linearizability check fails at seed 1: a retried write applies twice.
+- **The commit rule is off,** so a leader may commit an entry from an earlier term by counting replicas (Figure 8 in the paper). This one was hard to catch. With the default settings, 2,000 seeds never found it. A new leader sends the old entries and its own no-op in the same message, so the window where only the old entry is on a majority almost never opens. With one entry per message and ten times the crash rate, one seed in 2,000 found it (seed 1490). It was caught by the leader completeness check at tick 1828, before the run got as far as the linearizability check: node 2 became leader of term 30 holding an entry from term 16 at index 24, where an entry from term 11 had already been applied. The test replays that seed, and so does the last command under Other tests, which prints that failure and exits with status 1. Without `--unsafe-commit-old-terms` the same seed passes.
 
 That third one is the honest limit of the method. Random simulation finds bugs in proportion to how often their schedule comes up, and some schedules almost never do.
 
@@ -64,13 +66,13 @@ That third one is the honest limit of the method. Random simulation finds bugs i
 - `RaftNodeTest` drives nodes by hand through specific cases: votes only for up-to-date candidates and once per term, a follower replacing a conflicting uncommitted tail, the rejection hint, the own-term commit rule, reads confirmed only after a majority answers, a new leader holding reads, snapshots for a lagging follower, restart from saved state, stepping down on a higher term, and a stale rejection not moving `next` backwards.
 - `LinearizabilityTest` checks the checker on histories that are and are not linearizable.
 - `FileStorageTest` covers reopening, truncation by a later entry, a torn last record, a corrupted record, snapshots from the leader, compaction, and a crash between the snapshot and log renames.
-- `ClusterTest` runs three real servers on sockets and files, stops the leader, keeps writing, restarts it, and checks every key.
+- `ClusterTest` runs three real servers on sockets and files, stops the leader (a clean `close()`, not a crash), keeps writing, restarts it, and checks every key.
 
 ```
 ./gradlew test
 ./gradlew test -Draftkv.seeds=2000   # more simulation seeds than the default 100
 ./gradlew simulate --args="--seeds 10000"
-./gradlew simulate --args="--from 1490 --seeds 1 --nodes 3"   # replay one seed
+./gradlew simulate --args="--from 1490 --seeds 1 --nodes 3 --unsafe-commit-old-terms --max-entries-per-append 1 --crash-rate 0.03"   # the Figure 8 failure
 ```
 
 ## Performance
@@ -80,7 +82,7 @@ All of this is on one laptop: an M4 MacBook (10 cores, 24 GB, internal SSD), on 
 ```
 ./gradlew run --args="bench --nodes 3 --clients 2048"
 ./gradlew run --args="bench --nodes 3 --clients 2048 --sync false"   # no disk syncs, not crash-safe
-./gradlew run --args="failover --rounds 20"
+./gradlew run --args="failover --nodes 3 --rounds 20"
 python3 scripts/fullfsync.py
 ```
 
@@ -111,7 +113,7 @@ Two more runs at 8,192 clients with syncs on gave 92,950 and 90,924 writes/s, wi
 
 - **Reads** use the read index and do not touch the disk. With 2,048 clients and only reads, the cluster answers 199,713 a second at p50 10.1 ms, p99 18.0 ms; at that rate 2,048 clients queue for about 10 ms each. Mixed with writes it is a different story: at 90% reads it does 41,409 operations a second at p50 50 ms, close to a write. A read waits for a round of messages to a majority, and most likely that round is slow because it has to get through event loops that spend most of their time blocked in syncs.
 - **Five nodes** do 24,930 writes/s at 2,048 clients (p50 69 ms, p99 355 ms) and 65,714 at 8,192 (p50 117 ms, p99 731 ms). Five processes now share the drive's flushes, and a majority is three.
-- **Failover.** `failover` kills the leader with SIGKILL while one client keeps writing, and measures from the moment the old leader's process has exited to the first answer to a write sent after that. Over 20 kills: median 354 ms, fastest 169 ms, slowest 699 ms. Followers wait 150 to 290 ms (a random 15 to 29 ticks) without hearing from a leader before they start an election, and then the vote and the new leader's first entry each need syncs. I have not broken the slow rounds down further.
+- **Failover, on 3 nodes.** `failover` kills the leader with SIGKILL while one client keeps writing, and measures from the moment the old leader's process has exited to the first answer to a write sent after that. Over 20 kills: median 354 ms, fastest 169 ms, slowest 699 ms. Followers wait 150 to 290 ms (a random 15 to 29 ticks) without hearing from a leader before they start an election, and then the vote and the new leader's first entry each need syncs. I have not broken the slow rounds down further.
 
 ### What I fixed while measuring
 
