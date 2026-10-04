@@ -1,0 +1,19 @@
+# Apple M4, macOS 15.7.9, openjdk version "21.0.6" 2025-01-21 LTS
+# 'Battery Power', 2026-10-04 00:11
+# ./gradlew simulate --args="--seeds 2000 --nodes 3 --unsafe-commit-old-terms --max-entries-per-append 1 --crash-rate 0.03"
+1000 seeds ok, 1 s
+FAILED seed 1490, tick 1828: leader completeness: node 2 leads term 30 with term 16 at index 24, which was applied with term 11
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':simulate'.
+> Process 'command '/Users/salimbelhaj/Library/Java/JavaVirtualMachines/corretto-21.0.6/Contents/Home/bin/java'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1s

@@ -1,0 +1,9 @@
+# Apple M4, macOS 15.7.9, openjdk version "21.0.6" 2025-01-21 LTS
+# 'Battery Power', 2026-10-04 00:11
+# ./gradlew simulate --args="--seeds 2000 --unsafe-commit-old-terms"
+1000 seeds ok, 2 s
+2000 seeds ok, 3 s
+2000 runs, 5 nodes, no violations
+  client operations checked for linearizability: 480,000
+  leader elections: 17,995   crashes: 18,047   partitions: 14,476   snapshots sent: 24,024
+  packets: 19,643,923, of which dropped or cut off: 3,744,932

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rerun every number in the README's Testing and Performance sections and keep
-# the output in results/. About half an hour. Run it on a quiet machine: the
+# the output in results/. About 15 minutes. Run it on a quiet machine: the
 # benchmarks share the laptop's cores and SSD with whatever else is running.
 #
 #   scripts/measure.sh

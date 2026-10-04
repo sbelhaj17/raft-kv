@@ -1,0 +1,4 @@
+# Apple M4, macOS 15.7.9, openjdk version "21.0.6" 2025-01-21 LTS
+# 'Battery Power', 2026-10-04 00:11
+1 process(es): 222 flushes/s in total, median 4.43 ms each
+3 process(es): 223 flushes/s in total, median 13.19 ms each

@@ -1,0 +1,23 @@
+# Apple M4, macOS 15.7.9, openjdk version "21.0.6" 2025-01-21 LTS
+# 'Battery Power', 2026-10-04 00:21
+round 1: killed leader 1, writes resumed after 285 ms
+round 2: killed leader 3, writes resumed after 441 ms
+round 3: killed leader 1, writes resumed after 181 ms
+round 4: killed leader 2, writes resumed after 447 ms
+round 5: killed leader 3, writes resumed after 199 ms
+round 6: killed leader 1, writes resumed after 386 ms
+round 7: killed leader 2, writes resumed after 234 ms
+round 8: killed leader 1, writes resumed after 505 ms
+round 9: killed leader 2, writes resumed after 190 ms
+round 10: killed leader 1, writes resumed after 559 ms
+round 11: killed leader 3, writes resumed after 159 ms
+round 12: killed leader 2, writes resumed after 441 ms
+round 13: killed leader 1, writes resumed after 202 ms
+round 14: killed leader 2, writes resumed after 679 ms
+round 15: killed leader 1, writes resumed after 550 ms
+round 16: killed leader 3, writes resumed after 248 ms
+round 17: killed leader 2, writes resumed after 553 ms
+round 18: killed leader 1, writes resumed after 240 ms
+round 19: killed leader 3, writes resumed after 397 ms
+round 20: killed leader 2, writes resumed after 210 ms
+over 20 kills: min 159 ms, median 335 ms, max 679 ms
